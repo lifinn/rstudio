@@ -1,1 +1,2 @@
-
+This repository works as same as rocker/verse but is added more libraries to avoid re-installation everytime.
+Some libararies that I usually use are forecast, reshape2, ggthemes, mice ...
