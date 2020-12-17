@@ -5,4 +5,5 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     reshape2 \
     ggthemes \
     forecast \
-    mice
+    mice \
+    odbc
