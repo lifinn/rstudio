@@ -10,3 +10,4 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     odbc \
     mongolite \
     sendmailR
+RUN update.r --error
