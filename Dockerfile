@@ -1,5 +1,6 @@
 FROM rocker/verse
 ENV PASSWORD=docker
+RUN ln -s /usr/local/lib/R/site-library/littler/examples/update.r /usr/local/bin
 RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     --deps TRUE \
     feather \
@@ -9,6 +10,5 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     mice \
     odbc \
     mongolite \
-    sendmailR \
-    littler
-RUN update.r --error
+    sendmailR
+RUN update.r --ncpus 2
