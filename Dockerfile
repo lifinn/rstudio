@@ -9,5 +9,6 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     mice \
     odbc \
     mongolite \
-    sendmailR
+    sendmailR \
+    littler
 RUN update.r --error
