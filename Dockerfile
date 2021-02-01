@@ -6,6 +6,7 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     feather \
     reshape2 \
     ggthemes \
+    ggpubr \
     forecast \
     mice \
     odbc \
