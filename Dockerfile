@@ -9,6 +9,7 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     ggpubr \
     forecast \
     mice \
+    VIM \
     odbc \
     mongolite \
     sendmailR
