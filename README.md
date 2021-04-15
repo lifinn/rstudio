@@ -9,7 +9,18 @@ rocker/verse is a great docker image of R, but I have to install libraries that 
 ## Analysis libaries
 1. forecast
 2. mice
+3. VIM
 ## Drivers
 1. odbc
 2. mongolite 
 3. sendmailR
+# How to run this image
+```bash
+docker run -d -p 4104:8787 \
+    -v $HOME/rstudio:/home/<username> \
+    --restart unless-stopped \
+    --name rstudio \
+    -e USER=<username> \
+    -e PASSWORD=<password> \
+    finnli/rstudio
+```

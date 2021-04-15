@@ -10,7 +10,9 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     forecast \
     mice \
     VIM \
+    caret \
     odbc \
     mongolite \
     sendmailR
 RUN update.r --ncpus 2
+RUN R -e "tinytex::install_tinytex()"
