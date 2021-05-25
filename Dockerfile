@@ -14,3 +14,4 @@ RUN R -e "tinytex::install_tinytex()"
 RUN wget -O /home/rstudio/install-getnonfreefonts https://www.tug.org/fonts/getnonfreefonts/install-getnonfreefonts
 RUN texlua /home/rstudio/install-getnonfreefonts --sys
 RUN getnonfreefonts --sys -a
+USER rstudio
