@@ -7,9 +7,9 @@ RUN apt-get update -qq && apt-get upgrade -y && install2.r --error \
     ggthemes ggpubr \
     distr distrEx\
     forecast  mice  VIM  caret \
-    odbc mongolite sendmailR
-RUN update.r --ncpus 2
-RUN R -e "tinytex::install_tinytex()"
-RUN wget -O /home/rstudio/install-getnonfreefonts https://www.tug.org/fonts/getnonfreefonts/install-getnonfreefonts
-RUN texlua /home/rstudio/install-getnonfreefonts --sys
-RUN getnonfreefonts --sys -a
+    odbc mongolite sendmailR \
+    && update.r --ncpus 2 \
+    && R -e "tinytex::install_tinytex()"
+RUN wget -O /home/rstudio/install-getnonfreefonts https://www.tug.org/fonts/getnonfreefonts/install-getnonfreefonts \
+    && texlua /home/rstudio/install-getnonfreefonts --sys \
+    && getnonfreefonts --sys -a
