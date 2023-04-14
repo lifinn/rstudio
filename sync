@@ -1,3 +1,8 @@
-LAST_FILE=$(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | sort -n | tail -1)
-LAST_NUM=$(echo "${LAST_FILE#part-}" | sed 's/^0*//')
-for ((i=0; i<=LAST_NUM; i++)); do printf "part-%05d\n" $i | grep -qf <(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-") || echo "part-$i is missing"; done
+for i in $(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | sort -n); do
+    current=$(printf "part-%05d" $(echo ${i#part-} | sed 's/^0*//'))
+    expected=$(printf "part-%05d" $(echo ${previous#part-}+1 | bc))
+    if [[ "$current" != "$expected" ]]; then
+        echo "$expected is missing"
+    fi
+    previous=$current
+done
