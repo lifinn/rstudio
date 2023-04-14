@@ -1,6 +1,7 @@
+max_part=$(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | cut -d'-' -f2 | sort -n | tail -n1)
 for i in $(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | sort -n); do
     current=$(echo $i | cut -d'-' -f1-2)
-    expected=$(printf "part-%05d" $(echo ${previous#part-}+1 | bc))
+    expected=$(printf "part-%0${#max_part}d" $(echo ${previous#part-}+1 | bc))
     if [[ "$current" != "$expected" ]]; then
         echo "$expected is missing"
     fi
