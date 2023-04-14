@@ -1,7 +1,18 @@
-max_part=$(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | cut -d'-' -f2 | sort -n | tail -n1)
-for ((i=0; i<=$max_part; i++)); do
-    expected=$(printf "part-%0${#max_part}d" $i)
-    if ! aws s3 ls s3://<bucket>/<prefix>/$expected &> /dev/null; then
-        echo "$expected is missing"
+check_s3_parts() {
+    if [ -z "$1" ]; then
+        echo "Usage: check_s3_parts <s3_uri>"
+        return 1
     fi
-done
+
+    uri_parts=($(echo "$1" | tr '/' ' '))
+    bucket=${uri_parts[2]}
+    prefix=$(echo "$1" | sed "s/s3:\/\/$bucket\///")
+
+    max_part=$(aws s3 ls "s3://$bucket/$prefix" | awk '{print $4}' | grep "part-" | cut -d'-' -f2 | sort -n | tail -n1)
+    for ((i=0; i<=$max_part; i++)); do
+        expected=$(printf "part-%0${#max_part}d" $i)
+        if ! aws s3 ls "s3://$bucket/$prefix/$expected" &> /dev/null; then
+            echo "$expected is missing"
+        fi
+    done
+}
