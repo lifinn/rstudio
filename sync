@@ -1,1 +1,2 @@
-for i in $(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | sort -n); do printf "%s\n" "$i" | grep -q "$(printf "part-%05d" $(echo ${i#part-} | sed 's/^0*//'))" || echo "$(printf "part-%05d" $(echo ${i#part-} | sed 's/^0*//')) is missing"; done
+LAST_FILE=$(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | sort -n | tail -1)
+for ((i=0; i<=${LAST_FILE#part-*}; i++)); do printf "part-%05d\n" $i | grep -qf <(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-") || echo "part-$i is missing"; done
