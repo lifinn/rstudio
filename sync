@@ -1,0 +1,1 @@
+for i in $(aws s3 ls s3://<bucket>/<prefix>/ | awk '{print $4}' | grep "part-" | sort -n); do printf "%s\n" "$i" | grep -q "$(printf "part-%05d" $(echo ${i#part-} | sed 's/^0*//'))" || echo "$(printf "part-%05d" $(echo ${i#part-} | sed 's/^0*//')) is missing"; done
