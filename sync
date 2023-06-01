@@ -1,30 +1,21 @@
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-# Create the DataFrame
-data = [
-    (1, 1, 0), (1, 2, 0), (1, 3, 0), (1, 4, 0), (1, 5, 0),
-    (1, 6, 0), (1, 7, 0), (1, 8, 0), (1, 9, 0), (1, 10, 1),
-    (2, 1, 0), (2, 2, 0), (2, 3, 0), (2, 4, 0), (2, 5, 0),
-    (2, 6, 0), (2, 7, 0), (2, 8, 0), (2, 9, 1), (2, 10, 1),
-    (3, 1, 0), (3, 2, 0), (3, 3, 1), (3, 4, 1), (3, 5, 1),
-    (3, 6, 1), (3, 7, 0), (3, 8, 1), (3, 9, 1), (3, 10, 1),
-    (4, 1, 1), (4, 2, 0), (4, 3, 0), (4, 4, 0), (4, 5, 0),
-    (4, 6, 0), (4, 7, 1), (4, 8, 1), (4, 9, 1), (4, 10, 1)
-]
-df = spark.createDataFrame(data, ["Partition", "Order", "Flags"])
+# Create a window with partition by Partition and order by Order
+w = Window.partitionBy("Partition").orderBy("Order")
 
-# Define the window specification
-window_spec = Window.partitionBy("Partition").orderBy("Order")
+# Use the lag and lead functions to get the previous and next values of Flags
+df = df.withColumn("prev", F.lag("Flags").over(w))
+df = df.withColumn("next", F.lead("Flags").over(w))
 
-df = df.withColumn("FirstOne", F.min(F.when(F.col("Flags") == 1, F.col("Order"))).over(window_spec))
-df = df.withColumn("ConsecutiveOnes", F.sum(F.when(F.col("Flags") == 1, 1).otherwise(0)).over(window_spec))
+# Use a case when expression to check the logic for each row and add a new column Keep
+df = df.withColumn("Keep", F.expr("""
+case 
+  when Flags = 0 and (next = 0 or next is null) then true
+  when Flags = 1 and (prev = 1 or prev is null) and (next = 1 or next is null) then true
+  else false
+end
+"""))
 
-# Determine the "ShouldKeep_Correct" column based on the logic
-df = df.withColumn("ShouldKeep_Correct", (F.col("FirstOne").isNotNull()) & (F.col("Order") <= F.col("FirstOne") + F.col("ConsecutiveOnes")))
-
-# Filter the rows based on the logic
-df = df.filter(F.col("ShouldKeep") == True)
-
-# Show the output
+# Show the result
 df.show()
