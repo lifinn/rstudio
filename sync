@@ -20,7 +20,9 @@ window_spec = Window.partitionBy("Partition").orderBy("Order")
 # Apply the logic using window functions
 df = df.withColumn(
     "ShouldKeep",
-    F.sum((F.lag("Flags", default=0).over(window_spec) == 1) & (F.col("Flags") == 1)).over(window_spec) >= 1
+    F.row_number().over(window_spec) <= F.max(
+        F.when(F.col("Flags") == 1, F.row_number().over(window_spec)).otherwise(0)
+    ).over(window_spec)
 )
 
 # Filter the rows based on the logic
