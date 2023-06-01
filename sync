@@ -17,14 +17,13 @@ df = spark.createDataFrame(data, ["Partition", "Order", "Flags"])
 # Define the window specification
 window_spec = Window.partitionBy("Partition").orderBy("Order")
 
-# Apply the logic using window functions
-df = df.withColumn(
-    "ShouldKeep_Correct",
-    F.when(
-        (F.col("Flags") == 1) & (F.lead("Flags").over(window_spec) != 1),
-        True
-    ).otherwise(False)
-)
+# Create intermediate columns to track the first occurrence of 1 and consecutive 1s
+df = df.withColumn("FirstOne", F.first("Order").over(window_spec.rangeBetween(Window.unboundedPreceding, Window.unboundedFollowing)).alias("FirstOne"))
+df = df.withColumn("ConsecutiveOnes", F.sum(F.when(F.col("Flags") == 1, 1).otherwise(0)).over(window_spec).alias("ConsecutiveOnes"))
+
+# Determine the "ShouldKeep_Correct" column based on the logic
+df = df.withColumn("ShouldKeep_Correct", F.col("Order") <= F.col("FirstOne") + F.col("ConsecutiveOnes"))
+
 
 # Filter the rows based on the logic
 df = df.filter(F.col("ShouldKeep") == True)
