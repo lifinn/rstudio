@@ -1,3 +1,4 @@
+echo "This is a string with s3a:// and s3://" | sed 's/(?<!s3:)s3a:\/\/(?!s3)/s3:\/\//g'
 Hello, this is Bing. I can help you improve your explanation of the plot. Here is my suggestion:
 
 This plot shows how the log odds of weighted default events vary across different bins of raw data. The log odds are calculated as $$\log\left(\frac{p}{1-p}\right)$$, where $$p$$ is the probability of a default event occurring. The raw data is grouped into bins based on the variable `arrsbal_maxL6_`, which represents some form of categorized or binned data. The x-axis shows the mean value of each bin, and the y-axis shows the log odds of weighted default events. Each blue dot on the scatter plot represents the mean value of a bin plotted against its corresponding log odds.
