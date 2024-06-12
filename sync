@@ -115,3 +115,107 @@ def process_requests():
 
 # Main execution
 process_requests()
+
+import os
+import pandas as pd
+
+# Constants
+OUTPUT_DIR1 = "_data/api_data"
+OUTPUT_DIR2 = "_data/moniker_data"
+EXT_PARQ = ".parquet"
+SUMMARY_FILE_NAME = "crosscheck_summary"
+
+# Helper Function: monikername_to_filename
+def monikername_to_filename(moniker: str, period_name: str) -> str:
+    if moniker.startswith("//"):
+        moniker = moniker[2:]
+    moniker = moniker.replace("/", "_")
+    return f"{moniker}^{period_name}"
+
+# Function to Load DataFrames
+def load_dataframes(filename: str):
+    filename1 = os.path.join(OUTPUT_DIR1, filename)
+    filename2 = os.path.join(OUTPUT_DIR2, filename)
+    df1 = pd.read_parquet(filename1)
+    df2 = pd.read_parquet(filename2)
+    return df1, df2
+
+# Function to Compare DataFrames
+def compare_dataframes(df1, df2):
+    dtype_rest = str(dict(df1.dtypes))
+    shape_rest = str(df1.shape)
+    dtype_tran = str(dict(df2.dtypes))
+    shape_tran = str(df2.shape)
+    
+    if "collateral_id" in df1.columns:
+        cond_on = "collateral_id"
+    elif "account_id" in df1.columns:
+        cond_on = "account_id"
+    else:
+        raise ValueError("Neither 'collateral_id' nor 'account_id' found in columns")
+    
+    df = df1.merge(df2, on=cond_on, suffixes=["_rest", "_tran"])
+    valuematch = str(dict((df.iloc[:, 1] == df.iloc[:, 2]).value_counts()))
+    number_of_nulls = str(dict(df.isnull().sum()))
+
+    return dtype_rest, shape_rest, dtype_tran, shape_tran, valuematch, number_of_nulls, df
+
+# Function to Calculate Max Error
+def calculate_max_error(df):
+    if df.iloc[:, 1].dtype in (int, float):
+        ds_diff = df.iloc[:, 1] - df.iloc[:, 2]
+        max_error = ds_diff.max()
+        error_exp = str(ds_diff[ds_diff > 1e-15].head())
+    else:
+        max_error = f"{df.iloc[:, 1].dtype} is inapplicable"
+        error_exp = f"{df.iloc[:, 1].dtype} is inapplicable"
+    return max_error, error_exp
+
+# Function to Create Summary Row
+def create_summary_row(filename, dtype_rest, dtype_tran, shape_rest, shape_tran, valuematch, number_of_nulls, max_error, error_exp):
+    return pd.DataFrame({
+        "Moniker_name": filename,
+        "Dtype_REST": dtype_rest,
+        "Dtype_TRAN": dtype_tran,
+        "Shape_REST": shape_rest,
+        "Shape_TRAN": shape_tran,
+        "ValueMatch": valuematch,
+        "NumberofNulls": number_of_nulls,
+        "MaxError": max_error,
+        "ErrorExamples": error_exp,
+    }, index=[0])
+
+# Function to Handle Data Processing
+def process_data(file, month, Summary_df):
+    filename = monikername_to_filename(file, month) + EXT_PARQ
+    dtype_rest = dtype_tran = shape_rest = shape_tran = valuematch = number_of_nulls = max_error = error_exp = None
+
+    try:
+        df1, df2 = load_dataframes(filename)
+        dtype_rest, shape_rest, dtype_tran, shape_tran, valuematch, number_of_nulls, df = compare_dataframes(df1, df2)
+        max_error, error_exp = calculate_max_error(df)
+    except Exception as e:
+        max_error = error_exp = str(e)
+    
+    new_row = create_summary_row(filename, dtype_rest, dtype_tran, shape_rest, shape_tran, valuematch, number_of_nulls, max_error, error_exp)
+    Summary_df = pd.concat([Summary_df, new_row])
+    return Summary_df
+
+# Main Processing Function
+def main_processing(summary, output_dir):
+    Summary_df = pd.DataFrame(columns=[
+        "Moniker_name", "Dtype_REST", "Dtype_TRAN", "Shape_REST", "Shape_TRAN",
+        "ValueMatch", "NumberofNulls", "MaxError", "ErrorExamples"
+    ])
+
+    for file, month in summary.select("Moniker_name", "Month").iter_rows():
+        Summary_df = process_data(file, month, Summary_df)
+
+    summary_file_path = os.path.join(output_dir, f"{SUMMARY_FILE_NAME}_{month}.csv")
+    Summary_df.to_csv(summary_file_path)
+    print(Summary_df)
+
+# Assuming 'summary' is already defined DataFrame containing 'Moniker_name' and 'Month'
+# And 'output_dir' is the output directory path
+output_dir = "your_output_directory_here"
+main_processing(summary, output_dir)
