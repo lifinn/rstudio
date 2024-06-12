@@ -19,3 +19,99 @@ end
 
 # Show the result
 df.show()
+
+
+from ipython.QABUKRCR_318 import tranch_1_posts
+
+# Constants
+EXT_PARQ = ".parquet"
+MONTHS = ("2010M06", "2023M10")
+CHUNK_SIZE = 1
+OVER_RIDING = False  # Assuming this is defined somewhere
+
+# Moniker REST API parameters
+parameters_parq = {"month": list(MONTHS)}
+
+# Keeps track of execution time of each request
+Summary_df = pd.DataFrame(
+    columns=["Moniker_name", "Month", "Success", "Tot_time(sec.)", "Sub_request"]
+)
+
+# Moniker request dictionary
+request_parq = {
+    "/BUK/HomeFin/collateral/hpi_region_ons": {
+        "monikerName": "/BUK/HomeFin/collateral/hpi_region_ons",
+        "monikerVersion": "1",
+        "paramsMap": parameters_parq,
+        "dataSource": "HDFS",
+        "dataType": "parquet",
+    }
+}
+
+
+def monikername_to_filename(moniker: str, period_name: str) -> str:
+    if moniker.startswith("//"):
+        moniker = moniker[2:]
+    moniker = moniker.replace("/", "_")
+    return f"{moniker}^{period_name}"
+
+
+def fetch_parq_data_from_server(moniker: str, sub_request: dict, period_name: str):
+    moniker_name = monikername_to_filename(moniker, period_name)
+    file_path = os.path.join(output_dir, f"{moniker_name}{EXT_PARQ}")
+
+    if not OVER_RIDING and os.path.isfile(file_path):
+        print(f"{moniker} is already downloaded and saved in {output_dir} as {moniker_name}")
+        return True, 0, sub_request
+
+    print(f"Fetching moniker: {moniker}")
+    t_start = time.perf_counter()
+
+    parq_response = requests.post(api_url, json=sub_request, headers=headers_parq, verify=False)
+    tot_time = time.perf_counter() - t_start
+    content = parq_response.content
+
+    if parq_response:
+        print(f"Successful from {api_url}, headers={headers_parq}, sub_request={sub_request}")
+        with io.interface.open(file_path, "wb") as output:
+            output.write(content)
+        return True, tot_time, sub_request
+    else:
+        print(f"Unsuccessful from {api_url}, headers={headers_parq}, sub_request={sub_request}, status code={parq_response.status_code}")
+        return False, tot_time, sub_request
+
+
+def process_chunk_periods(moniker: str, sub_request: dict, chunk_periods: list):
+    for chunk_period in chunk_periods:
+        sub_request["paramsMap"]["month"] = chunk_period
+        period_name = chunk_period[0] if len(chunk_period) == 1 else f"{chunk_period[0]}-{chunk_period[-1]}"
+
+        success, tot_time, sub_request = fetch_parq_data_from_server(moniker, sub_request, period_name)
+
+        new_row = pd.DataFrame(
+            {
+                "Moniker_name": monikername_to_filename(moniker, period_name),
+                "Month": period_name,
+                "Success": success,
+                "Tot_time(sec.)": tot_time,
+                "Sub_request": str(sub_request),
+            },
+            index=[0],
+        )
+        global Summary_df
+        Summary_df = pd.concat([Summary_df, new_row])
+
+
+def process_requests():
+    for moniker, sub_request in request_parq.items():
+        period_lst = parameters_parq["month"]
+        chunk_periods = [period_lst[i:i + CHUNK_SIZE] for i in range(0, len(period_lst), CHUNK_SIZE)]
+        process_chunk_periods(moniker, sub_request, chunk_periods)
+
+    summary_file_path = os.path.join(output_dir, f"download_summary_{period_name}.csv")
+    Summary_df.to_csv(summary_file_path)
+    print(Summary_df)
+
+
+# Main execution
+process_requests()
