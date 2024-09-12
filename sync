@@ -1,221 +1,65 @@
-from pyspark.sql import functions as F
-from pyspark.sql.window import Window
-
-# Create a window with partition by Partition and order by Order
-w = Window.partitionBy("Partition").orderBy("Order")
-
-# Use the lag and lead functions to get the previous and next values of Flags
-df = df.withColumn("prev", F.lag("Flags").over(w))
-df = df.withColumn("next", F.lead("Flags").over(w))
-
-# Use a case when expression to check the logic for each row and add a new column Keep
-df = df.withColumn("Keep", F.expr("""
-case 
-  when Flags = 0 and (next = 0 or next is null) then true
-  when Flags = 1 and (prev = 1 or prev is null) and (next = 1 or next is null) then true
-  else false
-end
-"""))
-
-# Show the result
-df.show()
-
-
-from ipython.QABUKRCR_318 import tranch_1_posts
-
-# Constants
-EXT_PARQ = ".parquet"
-MONTHS = ("2010M06", "2023M10")
-CHUNK_SIZE = 1
-OVER_RIDING = False  # Assuming this is defined somewhere
-
-# Moniker REST API parameters
-parameters_parq = {"month": list(MONTHS)}
-
-# Keeps track of execution time of each request
-Summary_df = pd.DataFrame(
-    columns=["Moniker_name", "Month", "Success", "Tot_time(sec.)", "Sub_request"]
-)
-
-# Moniker request dictionary
-request_parq = {
-    "/BUK/HomeFin/collateral/hpi_region_ons": {
-        "monikerName": "/BUK/HomeFin/collateral/hpi_region_ons",
-        "monikerVersion": "1",
-        "paramsMap": parameters_parq,
-        "dataSource": "HDFS",
-        "dataType": "parquet",
-    }
-}
-
-
-def monikername_to_filename(moniker: str, period_name: str) -> str:
-    if moniker.startswith("//"):
-        moniker = moniker[2:]
-    moniker = moniker.replace("/", "_")
-    return f"{moniker}^{period_name}"
-
-
-def fetch_parq_data_from_server(moniker: str, sub_request: dict, period_name: str):
-    moniker_name = monikername_to_filename(moniker, period_name)
-    file_path = os.path.join(output_dir, f"{moniker_name}{EXT_PARQ}")
-
-    if not OVER_RIDING and os.path.isfile(file_path):
-        print(f"{moniker} is already downloaded and saved in {output_dir} as {moniker_name}")
-        return True, 0, sub_request
-
-    print(f"Fetching moniker: {moniker}")
-    t_start = time.perf_counter()
-
-    parq_response = requests.post(api_url, json=sub_request, headers=headers_parq, verify=False)
-    tot_time = time.perf_counter() - t_start
-    content = parq_response.content
-
-    if parq_response:
-        print(f"Successful from {api_url}, headers={headers_parq}, sub_request={sub_request}")
-        with io.interface.open(file_path, "wb") as output:
-            output.write(content)
-        return True, tot_time, sub_request
-    else:
-        print(f"Unsuccessful from {api_url}, headers={headers_parq}, sub_request={sub_request}, status code={parq_response.status_code}")
-        return False, tot_time, sub_request
-
-
-def process_chunk_periods(moniker: str, sub_request: dict, chunk_periods: list):
-    for chunk_period in chunk_periods:
-        sub_request["paramsMap"]["month"] = chunk_period
-        period_name = chunk_period[0] if len(chunk_period) == 1 else f"{chunk_period[0]}-{chunk_period[-1]}"
-
-        success, tot_time, sub_request = fetch_parq_data_from_server(moniker, sub_request, period_name)
-
-        new_row = pd.DataFrame(
-            {
-                "Moniker_name": monikername_to_filename(moniker, period_name),
-                "Month": period_name,
-                "Success": success,
-                "Tot_time(sec.)": tot_time,
-                "Sub_request": str(sub_request),
-            },
-            index=[0],
-        )
-        global Summary_df
-        Summary_df = pd.concat([Summary_df, new_row])
-
-
-def process_requests():
-    for moniker, sub_request in request_parq.items():
-        period_lst = parameters_parq["month"]
-        chunk_periods = [period_lst[i:i + CHUNK_SIZE] for i in range(0, len(period_lst), CHUNK_SIZE)]
-        process_chunk_periods(moniker, sub_request, chunk_periods)
-
-    summary_file_path = os.path.join(output_dir, f"download_summary_{period_name}.csv")
-    Summary_df.to_csv(summary_file_path)
-    print(Summary_df)
-
-
-# Main execution
-process_requests()
-
-import os
+import pytest
 import pandas as pd
+import numpy as np
+from hypothesis import given
+from hypothesis import strategies as st
 
-# Constants
-OUTPUT_DIR1 = "_data/api_data"
-OUTPUT_DIR2 = "_data/moniker_data"
-EXT_PARQ = ".parquet"
-SUMMARY_FILE_NAME = "crosscheck_summary"
-
-# Helper Function: monikername_to_filename
-def monikername_to_filename(moniker: str, period_name: str) -> str:
-    if moniker.startswith("//"):
-        moniker = moniker[2:]
-    moniker = moniker.replace("/", "_")
-    return f"{moniker}^{period_name}"
-
-# Function to Load DataFrames
-def load_dataframes(filename: str):
-    filename1 = os.path.join(OUTPUT_DIR1, filename)
-    filename2 = os.path.join(OUTPUT_DIR2, filename)
-    df1 = pd.read_parquet(filename1)
-    df2 = pd.read_parquet(filename2)
-    return df1, df2
-
-# Function to Compare DataFrames
-def compare_dataframes(df1, df2):
-    dtype_rest = str(dict(df1.dtypes))
-    shape_rest = str(df1.shape)
-    dtype_tran = str(dict(df2.dtypes))
-    shape_tran = str(df2.shape)
+# Hypothesis strategies for generating random test data
+@given(
+    customerrate=st.floats(min_value=0, max_value=10),
+    followonrate=st.one_of(st.none(), st.floats(min_value=0, max_value=10)),  # Could be NaN or a float
+    base_rate_obs=st.floats(min_value=0, max_value=5),
+    base_rate=st.floats(min_value=0, max_value=5),
+    repricing_end_date_is_na=st.booleans(),
+    rate_type_is_fixed=st.booleans(),
+    event_time_gt_repricing_end_date=st.booleans(),
+    follow_on_rate_type_is_fx=st.booleans(),
+)
+def test_customerrate_dynamic(
+    customerrate, followonrate, base_rate_obs, base_rate,
+    repricing_end_date_is_na, rate_type_is_fixed, 
+    event_time_gt_repricing_end_date, follow_on_rate_type_is_fx):
     
-    if "collateral_id" in df1.columns:
-        cond_on = "collateral_id"
-    elif "account_id" in df1.columns:
-        cond_on = "account_id"
+    # Create a mock dataframe with the relevant fields
+    df = pd.DataFrame({
+        'customerrate': [customerrate],
+        'followonrate': [followonrate],
+        'base_rate_obs': [base_rate_obs],
+        'base_rate': [base_rate]
+    })
+    
+    # Run the logic we're testing
+    customerrate_dynamic = utils.SWITCH_IF(
+        (repricing_end_date_is_na & rate_type_is_fixed, df['customerrate'][0]),
+        (repricing_end_date_is_na & (~rate_type_is_fixed), df['customerrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
+        ((~event_time_gt_repricing_end_date) & rate_type_is_fixed, df['customerrate'][0]),
+        ((~event_time_gt_repricing_end_date) & (~rate_type_is_fixed), df['customerrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
+        (event_time_gt_repricing_end_date & follow_on_rate_type_is_fx & pd.isna(df['followonrate'][0]), df['customerrate'][0]),
+        (event_time_gt_repricing_end_date & follow_on_rate_type_is_fx & (~pd.isna(df['followonrate'][0])), df['followonrate'][0]),
+        (event_time_gt_repricing_end_date & (~follow_on_rate_type_is_fx) & pd.isna(df['followonrate'][0]), df['customerrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
+        (event_time_gt_repricing_end_date & (~follow_on_rate_type_is_fx) & (~pd.isna(df['followonrate'][0])), df['followonrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
+        default=None,
+    )
+
+    # Expected results based on the logic and random data
+    if repricing_end_date_is_na and rate_type_is_fixed:
+        expected = customerrate
+    elif repricing_end_date_is_na and not rate_type_is_fixed:
+        expected = customerrate - base_rate_obs + base_rate
+    elif not event_time_gt_repricing_end_date and rate_type_is_fixed:
+        expected = customerrate
+    elif not event_time_gt_repricing_end_date and not rate_type_is_fixed:
+        expected = customerrate - base_rate_obs + base_rate
+    elif event_time_gt_repricing_end_date and follow_on_rate_type_is_fx and pd.isna(followonrate):
+        expected = customerrate
+    elif event_time_gt_repricing_end_date and follow_on_rate_type_is_fx and not pd.isna(followonrate):
+        expected = followonrate
+    elif event_time_gt_repricing_end_date and not follow_on_rate_type_is_fx and pd.isna(followonrate):
+        expected = customerrate - base_rate_obs + base_rate
+    elif event_time_gt_repricing_end_date and not follow_on_rate_type_is_fx and not pd.isna(followonrate):
+        expected = followonrate - base_rate_obs + base_rate
     else:
-        raise ValueError("Neither 'collateral_id' nor 'account_id' found in columns")
-    
-    df = df1.merge(df2, on=cond_on, suffixes=["_rest", "_tran"])
-    valuematch = str(dict((df.iloc[:, 1] == df.iloc[:, 2]).value_counts()))
-    number_of_nulls = str(dict(df.isnull().sum()))
+        expected = None
 
-    return dtype_rest, shape_rest, dtype_tran, shape_tran, valuematch, number_of_nulls, df
-
-# Function to Calculate Max Error
-def calculate_max_error(df):
-    if df.iloc[:, 1].dtype in (int, float):
-        ds_diff = df.iloc[:, 1] - df.iloc[:, 2]
-        max_error = ds_diff.max()
-        error_exp = str(ds_diff[ds_diff > 1e-15].head())
-    else:
-        max_error = f"{df.iloc[:, 1].dtype} is inapplicable"
-        error_exp = f"{df.iloc[:, 1].dtype} is inapplicable"
-    return max_error, error_exp
-
-# Function to Create Summary Row
-def create_summary_row(filename, dtype_rest, dtype_tran, shape_rest, shape_tran, valuematch, number_of_nulls, max_error, error_exp):
-    return pd.DataFrame({
-        "Moniker_name": filename,
-        "Dtype_REST": dtype_rest,
-        "Dtype_TRAN": dtype_tran,
-        "Shape_REST": shape_rest,
-        "Shape_TRAN": shape_tran,
-        "ValueMatch": valuematch,
-        "NumberofNulls": number_of_nulls,
-        "MaxError": max_error,
-        "ErrorExamples": error_exp,
-    }, index=[0])
-
-# Function to Handle Data Processing
-def process_data(file, month, Summary_df):
-    filename = monikername_to_filename(file, month) + EXT_PARQ
-    dtype_rest = dtype_tran = shape_rest = shape_tran = valuematch = number_of_nulls = max_error = error_exp = None
-
-    try:
-        df1, df2 = load_dataframes(filename)
-        dtype_rest, shape_rest, dtype_tran, shape_tran, valuematch, number_of_nulls, df = compare_dataframes(df1, df2)
-        max_error, error_exp = calculate_max_error(df)
-    except Exception as e:
-        max_error = error_exp = str(e)
-    
-    new_row = create_summary_row(filename, dtype_rest, dtype_tran, shape_rest, shape_tran, valuematch, number_of_nulls, max_error, error_exp)
-    Summary_df = pd.concat([Summary_df, new_row])
-    return Summary_df
-
-# Main Processing Function
-def main_processing(summary, output_dir):
-    Summary_df = pd.DataFrame(columns=[
-        "Moniker_name", "Dtype_REST", "Dtype_TRAN", "Shape_REST", "Shape_TRAN",
-        "ValueMatch", "NumberofNulls", "MaxError", "ErrorExamples"
-    ])
-
-    for file, month in summary.select("Moniker_name", "Month").iter_rows():
-        Summary_df = process_data(file, month, Summary_df)
-
-    summary_file_path = os.path.join(output_dir, f"{SUMMARY_FILE_NAME}_{month}.csv")
-    Summary_df.to_csv(summary_file_path)
-    print(Summary_df)
-
-# Assuming 'summary' is already defined DataFrame containing 'Moniker_name' and 'Month'
-# And 'output_dir' is the output directory path
-output_dir = "your_output_directory_here"
-main_processing(summary, output_dir)
+    # Assert that the dynamic customerrate matches the expected result
+    assert customerrate_dynamic == expected
