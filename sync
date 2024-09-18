@@ -1,73 +1,56 @@
-# Define calculation based on MM_SEGMENT
-seg1 = df['MM_SEGMENT'].isin(['seg1a', 'seg1b', 'seg1c', 'seg1d'])
-seg2 = df['MM_SEGMENT'].isin(['seg2a', 'seg2b', 'seg2c'])
-seg3 = df['MM_SEGMENT'].isin(['seg3a', 'seg3b', 'seg3c', 'seg3d'])
-segR = df['MM_SEGMENT'] == 'R'
+# Snapshot conditions based on MM_SEGMENT and MONTHS_SINCE_SNAPSHOT
+snapshot_conditions = [
+    (df['MONTHS_SINCE_SNAPSHOT'] == 1) & (df['MM_SEGMENT'] == seg) for seg in [
+        'seg1a', 'seg1e', 'seg1f', 'seg1g', 'seg2a', 'seg2b'
+    ]
+]
+snapshot_values = [
+    df['CONTRACTUAL_BALANCE'] + 1 * df['BILLING_AMOUNT_CALC'] for _ in range(3)
+] + [
+    df['CONTRACTUAL_BALANCE'] + 2 * df['BILLING_AMOUNT_CALC'] for _ in range(3)
+]
 
-# Define payment percentages and missed payments for segments
-pay_perc = df['MM_SEGMENT'].map({
-    'seg2a': pay_perc_seg2a, 'seg2b': pay_perc_seg2b, 'seg2c': pay_perc_seg2c,
-    'seg3a': pay_perc_seg3a, 'seg3b': pay_perc_seg3b, 'seg3c': pay_perc_seg3c, 'seg3d': pay_perc_seg3d
-})
-missed_payment = df['MM_SEGMENT'].map({
-    'seg1a': df['missed_payment_seg1a'], 'seg1b': df['missed_payment_seg1b'], 'seg1c': df['missed_payment_seg1c'], 'seg1d': df['missed_payment_seg1d'],
-    'seg2a': df['missed_payment_seg2a'], 'seg2b': df['missed_payment_seg2b'], 'seg2c': df['missed_payment_seg2c'],
-    'seg3a': df['missed_payment_seg3a'], 'seg3b': df['missed_payment_seg3b'], 'seg3c': df['missed_payment_seg3c'], 'seg3d': df['missed_payment_seg3d']
-})
-
-# Calculate MM_EAD in a vectorized manner
-df['MM_EAD'] = np.where(
-    seg1,
-    df['CURRENT_BALANCE_CORR'] + missed_payment * df['BILLING_AMOUNT_CALC'],
+# Unified EAD Calculation (combining MM_EAD1 and MM_EAD2 logic)
+df['MM_EAD_FINAL'] = np.where(
+    df['DEF_G5'] == 1,
+    df['CURRENT_BALANCE_CORR'] + 3 * df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
     np.where(
-        seg2,
-        df['CURRENT_BALANCE_CORR'] * (1 - pay_perc) + missed_payment * df['BILLING_AMOUNT_CALC'],
-        np.where(
-            seg3,
-            df['CURRENT_BALANCE_CORR'] * (1 - pay_perc) + missed_payment * df['BILLING_AMOUNT_CALC'] + df['CURRENT_BALANCE_CORR'] * df['MONTHLY_RATE'] * (1 - pay_perc),
-            np.where(
-                segR,
-                df['AMORTMETHOD_CORR'] + df['CURRENT_BALANCE_CORR'] * df['MONTHLY_RATE'] * (1 - pay_perc),
-                None
+        df['MONTHS_SINCE_SNAPSHOT'] == 0,
+        df['CONTRACTUAL_BALANCE'],
+        np.select(
+            snapshot_conditions,
+            snapshot_values,
+            default=np.where(
+                df['DEF_G5'] == 0,
+                df['CURRENT_BALANCE_CORR'] + np.select(
+                    [
+                        df['REMAINING_TERM_OBS'] == 0,
+                        df['REMAINING_TERM_OBS'] == 1,
+                        df['REMAINING_TERM_OBS'] == 2,
+                        df['REMAINING_TERM_OBS'] == 3
+                    ],
+                    [
+                        0,  # No adjustment for REMAINING_TERM_OBS == 0
+                        2 * df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
+                        1 * df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
+                        df['MM_EAD']
+                    ],
+                    default=df['MM_EAD']
+                ),
+                df['MM_EAD']
             )
         )
     )
 )
 
-# Define conditions for MM_EAD1 based on DEF_G5 and REMAINING_TERM_OBS
-df['MM_EAD1'] = np.where(
-    df['DEF_G5'] == 1,
-    df['CURRENT_BALANCE_CORR'] * 3 + df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
-    np.where(
-        (df['DEF_G5'] == 0) & (df['REMAINING_TERM_OBS'] == 1),
-        df['CURRENT_BALANCE_CORR'] * 2 + df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
-        np.where(
-            (df['DEF_G5'] == 0) & (df['REMAINING_TERM_OBS'] == 0),
-            df['CURRENT_BALANCE_CORR'],
-            df['MM_EAD']
-        )
-    )
-)
-
-# Define conditions for MM_EAD2 based on MONTHS_SINCE_SNAPSHOT
-df['MM_EAD2'] = np.where(
-    df['MONTHS_SINCE_SNAPSHOT'] == 0,
-    df['CONTRACTUAL_BALANCE'] + df['BILLING_AMOUNT_CALC'],
-    np.where(
-        (df['MONTHS_SINCE_SNAPSHOT'] == 1) & (df['MM_SEGMENT'] == 'seg1a'),
-        df['CONTRACTUAL_BALANCE'] + df['BILLING_AMOUNT_CALC'] * 1.1,
-        df['MM_EAD']
-    )
-)
-
-# Combine MM_EAD1 and MM_EAD2 into the final EAD
+# Final adjustment for reserve account indicator
 df['MM_EAD_FINAL'] = np.where(
     (df['RESERVE_ACCOUNT_INDICATOR'] == 'Y') | df['RESERVE_ACCOUNT_INDICATOR'].notnull(),
-    df['MM_EAD2'],
-    df['MM_EAD1']
+    df['MM_EAD_FINAL'],
+    0
 )
 
-# Ensure final output is clean
+# Ensure final EAD is clean
 df['MM_EAD_FINAL'] = df['MM_EAD_FINAL'].fillna(0).astype(float)
 
 return df['MM_EAD_FINAL']
