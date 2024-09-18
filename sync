@@ -1,65 +1,73 @@
-import pytest
-import pandas as pd
-import numpy as np
-from hypothesis import given
-from hypothesis import strategies as st
+# Define calculation based on MM_SEGMENT
+seg1 = df['MM_SEGMENT'].isin(['seg1a', 'seg1b', 'seg1c', 'seg1d'])
+seg2 = df['MM_SEGMENT'].isin(['seg2a', 'seg2b', 'seg2c'])
+seg3 = df['MM_SEGMENT'].isin(['seg3a', 'seg3b', 'seg3c', 'seg3d'])
+segR = df['MM_SEGMENT'] == 'R'
 
-# Hypothesis strategies for generating random test data
-@given(
-    customerrate=st.floats(min_value=0, max_value=10),
-    followonrate=st.one_of(st.none(), st.floats(min_value=0, max_value=10)),  # Could be NaN or a float
-    base_rate_obs=st.floats(min_value=0, max_value=5),
-    base_rate=st.floats(min_value=0, max_value=5),
-    repricing_end_date_is_na=st.booleans(),
-    rate_type_is_fixed=st.booleans(),
-    event_time_gt_repricing_end_date=st.booleans(),
-    follow_on_rate_type_is_fx=st.booleans(),
-)
-def test_customerrate_dynamic(
-    customerrate, followonrate, base_rate_obs, base_rate,
-    repricing_end_date_is_na, rate_type_is_fixed, 
-    event_time_gt_repricing_end_date, follow_on_rate_type_is_fx):
-    
-    # Create a mock dataframe with the relevant fields
-    df = pd.DataFrame({
-        'customerrate': [customerrate],
-        'followonrate': [followonrate],
-        'base_rate_obs': [base_rate_obs],
-        'base_rate': [base_rate]
-    })
-    
-    # Run the logic we're testing
-    customerrate_dynamic = utils.SWITCH_IF(
-        (repricing_end_date_is_na & rate_type_is_fixed, df['customerrate'][0]),
-        (repricing_end_date_is_na & (~rate_type_is_fixed), df['customerrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
-        ((~event_time_gt_repricing_end_date) & rate_type_is_fixed, df['customerrate'][0]),
-        ((~event_time_gt_repricing_end_date) & (~rate_type_is_fixed), df['customerrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
-        (event_time_gt_repricing_end_date & follow_on_rate_type_is_fx & pd.isna(df['followonrate'][0]), df['customerrate'][0]),
-        (event_time_gt_repricing_end_date & follow_on_rate_type_is_fx & (~pd.isna(df['followonrate'][0])), df['followonrate'][0]),
-        (event_time_gt_repricing_end_date & (~follow_on_rate_type_is_fx) & pd.isna(df['followonrate'][0]), df['customerrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
-        (event_time_gt_repricing_end_date & (~follow_on_rate_type_is_fx) & (~pd.isna(df['followonrate'][0])), df['followonrate'][0] - df['base_rate_obs'][0] + df['base_rate'][0]),
-        default=None,
+# Define payment percentages and missed payments for segments
+pay_perc = df['MM_SEGMENT'].map({
+    'seg2a': pay_perc_seg2a, 'seg2b': pay_perc_seg2b, 'seg2c': pay_perc_seg2c,
+    'seg3a': pay_perc_seg3a, 'seg3b': pay_perc_seg3b, 'seg3c': pay_perc_seg3c, 'seg3d': pay_perc_seg3d
+})
+missed_payment = df['MM_SEGMENT'].map({
+    'seg1a': df['missed_payment_seg1a'], 'seg1b': df['missed_payment_seg1b'], 'seg1c': df['missed_payment_seg1c'], 'seg1d': df['missed_payment_seg1d'],
+    'seg2a': df['missed_payment_seg2a'], 'seg2b': df['missed_payment_seg2b'], 'seg2c': df['missed_payment_seg2c'],
+    'seg3a': df['missed_payment_seg3a'], 'seg3b': df['missed_payment_seg3b'], 'seg3c': df['missed_payment_seg3c'], 'seg3d': df['missed_payment_seg3d']
+})
+
+# Calculate MM_EAD in a vectorized manner
+df['MM_EAD'] = np.where(
+    seg1,
+    df['CURRENT_BALANCE_CORR'] + missed_payment * df['BILLING_AMOUNT_CALC'],
+    np.where(
+        seg2,
+        df['CURRENT_BALANCE_CORR'] * (1 - pay_perc) + missed_payment * df['BILLING_AMOUNT_CALC'],
+        np.where(
+            seg3,
+            df['CURRENT_BALANCE_CORR'] * (1 - pay_perc) + missed_payment * df['BILLING_AMOUNT_CALC'] + df['CURRENT_BALANCE_CORR'] * df['MONTHLY_RATE'] * (1 - pay_perc),
+            np.where(
+                segR,
+                df['AMORTMETHOD_CORR'] + df['CURRENT_BALANCE_CORR'] * df['MONTHLY_RATE'] * (1 - pay_perc),
+                None
+            )
+        )
     )
+)
 
-    # Expected results based on the logic and random data
-    if repricing_end_date_is_na and rate_type_is_fixed:
-        expected = customerrate
-    elif repricing_end_date_is_na and not rate_type_is_fixed:
-        expected = customerrate - base_rate_obs + base_rate
-    elif not event_time_gt_repricing_end_date and rate_type_is_fixed:
-        expected = customerrate
-    elif not event_time_gt_repricing_end_date and not rate_type_is_fixed:
-        expected = customerrate - base_rate_obs + base_rate
-    elif event_time_gt_repricing_end_date and follow_on_rate_type_is_fx and pd.isna(followonrate):
-        expected = customerrate
-    elif event_time_gt_repricing_end_date and follow_on_rate_type_is_fx and not pd.isna(followonrate):
-        expected = followonrate
-    elif event_time_gt_repricing_end_date and not follow_on_rate_type_is_fx and pd.isna(followonrate):
-        expected = customerrate - base_rate_obs + base_rate
-    elif event_time_gt_repricing_end_date and not follow_on_rate_type_is_fx and not pd.isna(followonrate):
-        expected = followonrate - base_rate_obs + base_rate
-    else:
-        expected = None
+# Define conditions for MM_EAD1 based on DEF_G5 and REMAINING_TERM_OBS
+df['MM_EAD1'] = np.where(
+    df['DEF_G5'] == 1,
+    df['CURRENT_BALANCE_CORR'] * 3 + df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
+    np.where(
+        (df['DEF_G5'] == 0) & (df['REMAINING_TERM_OBS'] == 1),
+        df['CURRENT_BALANCE_CORR'] * 2 + df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
+        np.where(
+            (df['DEF_G5'] == 0) & (df['REMAINING_TERM_OBS'] == 0),
+            df['CURRENT_BALANCE_CORR'],
+            df['MM_EAD']
+        )
+    )
+)
 
-    # Assert that the dynamic customerrate matches the expected result
-    assert customerrate_dynamic == expected
+# Define conditions for MM_EAD2 based on MONTHS_SINCE_SNAPSHOT
+df['MM_EAD2'] = np.where(
+    df['MONTHS_SINCE_SNAPSHOT'] == 0,
+    df['CONTRACTUAL_BALANCE'] + df['BILLING_AMOUNT_CALC'],
+    np.where(
+        (df['MONTHS_SINCE_SNAPSHOT'] == 1) & (df['MM_SEGMENT'] == 'seg1a'),
+        df['CONTRACTUAL_BALANCE'] + df['BILLING_AMOUNT_CALC'] * 1.1,
+        df['MM_EAD']
+    )
+)
+
+# Combine MM_EAD1 and MM_EAD2 into the final EAD
+df['MM_EAD_FINAL'] = np.where(
+    (df['RESERVE_ACCOUNT_INDICATOR'] == 'Y') | df['RESERVE_ACCOUNT_INDICATOR'].notnull(),
+    df['MM_EAD2'],
+    df['MM_EAD1']
+)
+
+# Ensure final output is clean
+df['MM_EAD_FINAL'] = df['MM_EAD_FINAL'].fillna(0).astype(float)
+
+return df['MM_EAD_FINAL']
