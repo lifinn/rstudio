@@ -1,56 +1,28 @@
-# Snapshot conditions based on MM_SEGMENT and MONTHS_SINCE_SNAPSHOT
-snapshot_conditions = [
-    (df['MONTHS_SINCE_SNAPSHOT'] == 1) & (df['MM_SEGMENT'] == seg) for seg in [
-        'seg1a', 'seg1e', 'seg1f', 'seg1g', 'seg2a', 'seg2b'
-    ]
-]
-snapshot_values = [
-    df['CONTRACTUAL_BALANCE'] + 1 * df['BILLING_AMOUNT_CALC'] for _ in range(3)
-] + [
-    df['CONTRACTUAL_BALANCE'] + 2 * df['BILLING_AMOUNT_CALC'] for _ in range(3)
-]
+import subprocess
 
-# Unified EAD Calculation (combining MM_EAD1 and MM_EAD2 logic)
-df['MM_EAD_FINAL'] = np.where(
-    df['DEF_G5'] == 1,
-    df['CURRENT_BALANCE_CORR'] + 3 * df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
-    np.where(
-        df['MONTHS_SINCE_SNAPSHOT'] == 0,
-        df['CONTRACTUAL_BALANCE'],
-        np.select(
-            snapshot_conditions,
-            snapshot_values,
-            default=np.where(
-                df['DEF_G5'] == 0,
-                df['CURRENT_BALANCE_CORR'] + np.select(
-                    [
-                        df['REMAINING_TERM_OBS'] == 0,
-                        df['REMAINING_TERM_OBS'] == 1,
-                        df['REMAINING_TERM_OBS'] == 2,
-                        df['REMAINING_TERM_OBS'] == 3
-                    ],
-                    [
-                        0,  # No adjustment for REMAINING_TERM_OBS == 0
-                        2 * df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
-                        1 * df['MONTHLY_RATE'] * df['CURRENT_BALANCE_CORR'],
-                        df['MM_EAD']
-                    ],
-                    default=df['MM_EAD']
-                ),
-                df['MM_EAD']
-            )
-        )
-    )
-)
+# Run the 'aws s3 ls' command for a given bucket
+bucket_name = 's3://your-bucket-name/'
+result = subprocess.run(['aws', 's3', 'ls', bucket_name, '--recursive'], capture_output=True, text=True)
 
-# Final adjustment for reserve account indicator
-df['MM_EAD_FINAL'] = np.where(
-    (df['RESERVE_ACCOUNT_INDICATOR'] == 'Y') | df['RESERVE_ACCOUNT_INDICATOR'].notnull(),
-    df['MM_EAD_FINAL'],
-    0
-)
+# Store the output
+output = result.stdout
 
-# Ensure final EAD is clean
-df['MM_EAD_FINAL'] = df['MM_EAD_FINAL'].fillna(0).astype(float)
+files = []
 
-return df['MM_EAD_FINAL']
+# Split the output into lines
+for line in output.splitlines():
+    # Split the line by spaces to extract the date, time, size, and filename
+    parts = line.split()
+
+    # If the line contains a file (i.e., 4 or more parts), extract the size and filename
+    if len(parts) >= 4:
+        size = int(parts[2])
+        filename = ' '.join(parts[3:])  # Join the remaining parts as filename (in case it has spaces)
+
+        # Keep only files with size > 0
+        if size > 0:
+            files.append((filename, size))
+
+# Print or process the filtered files
+for filename, size in files:
+    print(f"File: {filename}, Size: {size} bytes")
