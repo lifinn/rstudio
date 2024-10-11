@@ -26,3 +26,24 @@ for line in output.splitlines():
 # Print or process the filtered files
 for filename, size in files:
     print(f"File: {filename}, Size: {size} bytes")
+
+import pandas as pd
+from hypothesis import given
+import hypothesis.strategies as st
+
+# Define a strategy to generate a pd.Period object
+period_strategy = st.builds(pd.Period, st.integers(min_value=1900, max_value=2100), st.sampled_from(['Y', 'M', 'D']))
+
+# Use hypothesis to test generation of a DataFrame with a Period column
+@given(st.data())
+def test_period_column(data):
+    # Generate a list of pd.Period objects
+    periods = data.draw(st.lists(period_strategy, min_size=1, max_size=10))
+    
+    # Create a DataFrame with the generated periods
+    df = pd.DataFrame({"period_column": periods})
+    
+    print(df)
+
+# Run the test
+test_period_column()
