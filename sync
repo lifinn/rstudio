@@ -1,49 +1,22 @@
-import subprocess
+window_spec = Window.orderBy('id').rowsBetween(0, 8)
 
-# Run the 'aws s3 ls' command for a given bucket
-bucket_name = 's3://your-bucket-name/'
-result = subprocess.run(['aws', 's3', 'ls', bucket_name, '--recursive'], capture_output=True, text=True)
-
-# Store the output
-output = result.stdout
-
-files = []
-
-# Split the output into lines
-for line in output.splitlines():
-    # Split the line by spaces to extract the date, time, size, and filename
-    parts = line.split()
-
-    # If the line contains a file (i.e., 4 or more parts), extract the size and filename
-    if len(parts) >= 4:
-        size = int(parts[2])
-        filename = ' '.join(parts[3:])  # Join the remaining parts as filename (in case it has spaces)
-
-        # Keep only files with size > 0
-        if size > 0:
-            files.append((filename, size))
-
-# Print or process the filtered files
-for filename, size in files:
-    print(f"File: {filename}, Size: {size} bytes")
-
-import pandas as pd
-from hypothesis import given
-import hypothesis.strategies as st
-
-# Define a strategy to generate a pd.Period object
-period_strategy = st.builds(pd.Period, st.integers(min_value=1900, max_value=2100), st.sampled_from(['Y', 'M', 'D']))
-
-# Use hypothesis to test generation of a DataFrame with a Period column
-@given(st.data())
-def test_period_column(data):
-    # Generate a list of pd.Period objects
-    periods = data.draw(st.lists(period_strategy, min_size=1, max_size=10))
-    
-    # Create a DataFrame with the generated periods
-    df = pd.DataFrame({"period_column": periods})
-    
-    print(df)
-
-# Run the test
-test_period_column()
+def find_pattern(df):
+    return (df
+        # Add row number as id for ordering
+        .withColumn('id', F.monotonically_increasing_id())
+        # Create a column that checks if next 8 values are all 'n'
+        .withColumn('next_8_n', 
+            (F.sum(F.when(F.col('value') == 'n', 1).otherwise(0))
+            .over(window_spec) == 8))
+        # Check if current value is 'p'
+        .withColumn('is_p', F.col('value') == 'p')
+        # Combine conditions: current is 'p' AND next 8 are 'n'
+        .withColumn('pattern_start', 
+            F.when(F.col('is_p') & F.col('next_8_n'), 1).otherwise(0))
+        # Keep only the first occurrence
+        .withColumn('result', 
+            F.when(F.sum('pattern_start').over(Window.orderBy('id')) <= 1, 
+                  F.col('pattern_start'))
+            .otherwise(0))
+        # Select only the result column
+        .select('result'))
