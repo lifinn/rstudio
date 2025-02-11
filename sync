@@ -5,29 +5,38 @@ def find_pattern(df):
     # Add row number for ordering
     df = df.withColumn('id', F.monotonically_increasing_id())
     
-    # Create a window for checking consecutive values
+    # Create windows for analysis
     window_prev = Window.orderBy('id')
     
     return (df
-        # Mark where consecutive 'n' sequence starts
+        # Mark where new p-sequence starts
+        .withColumn('p_start',
+            F.when(
+                (F.col('value') == 'p') & 
+                (F.lag('value', 1).over(window_prev) != 'p'),
+                F.col('id')
+            ).otherwise(None))
+        # Fill forward the p-sequence start position
+        .withColumn('p_group',
+            F.last('p_start', ignorenulls=True).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)))
+        # Mark where n-sequence starts
         .withColumn('n_start',
             F.when(
                 (F.col('value') == 'n') & 
                 (F.lag('value', 1).over(window_prev) != 'n'),
                 F.col('id')
             ).otherwise(None))
-        # Fill forward the start position for all 'n's in the sequence
-        .withColumn('n_group',
-            F.last('n_start', ignorenulls=True).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)))
-        # Count consecutive 'n's in each group
+        # Count consecutive n's after each position
         .withColumn('n_count',
-            F.sum(F.when(F.col('value') == 'n', 1).otherwise(0))
-            .over(Window.partitionBy('n_group').orderBy('id').rowsBetween(Window.unboundedPreceding, Window.currentRow)))
-        # Find where 'p' is followed by 8 consecutive 'n's
+            F.when(F.col('value') == 'n',
+                F.count('*').over(Window.orderBy('id').rowsBetween(0, Window.unboundedFollowing))
+            ).otherwise(0))
+        # Find where p-sequence is followed by 8+ consecutive n's
         .withColumn('pattern_start',
             F.when(
                 (F.col('value') == 'p') &
-                (F.lead('n_count', 8).over(window_prev) == 8),
+                (F.lead('n_count', 1).over(window_prev) >= 8) &
+                (F.col('id') == F.col('p_group')),  # First p in sequence
                 1
             ).otherwise(0))
         # Keep only the first occurrence
@@ -39,6 +48,6 @@ def find_pattern(df):
         .select('result'))
 
 # Example usage:
-data = ['p','p','p','n','n','n','n','n','n','n','n','n','n','f','p','p','p','n','n']
+data = ['f','p','f','p','p','f','p','p','p','p','n','n','n','n','n']
 df = spark.createDataFrame([(x,) for x in data], ['value'])
 result_df = find_pattern(df)
