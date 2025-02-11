@@ -1,53 +1,40 @@
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-def find_pattern(df):
-    # Add row number for ordering
-    df = df.withColumn('id', F.monotonically_increasing_id())
-    
-    # Create windows for analysis
-    window_prev = Window.orderBy('id')
+def find_pattern_start(df, value_column, flag_column):
+    window_spec = Window.orderBy('id')
     
     return (df
-        # Mark where new p-sequence starts
-        .withColumn('p_start',
+        .withColumn('id', F.monotonically_increasing_id())
+        # Find where new sequence starts
+        .withColumn('seq_start',
             F.when(
-                (F.col('value') == 'p') & 
-                (F.lag('value', 1).over(window_prev) != 'p'),
-                F.col('id')
-            ).otherwise(None))
-        # Fill forward the p-sequence start position
-        .withColumn('p_group',
-            F.last('p_start', ignorenulls=True).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)))
-        # Mark where n-sequence starts
-        .withColumn('n_start',
-            F.when(
-                (F.col('value') == 'n') & 
-                (F.lag('value', 1).over(window_prev) != 'n'),
-                F.col('id')
-            ).otherwise(None))
-        # Count consecutive n's after each position
-        .withColumn('n_count',
-            F.when(F.col('value') == 'n',
-                F.count('*').over(Window.orderBy('id').rowsBetween(0, Window.unboundedFollowing))
-            ).otherwise(0))
-        # Find where p-sequence is followed by 8+ consecutive n's
-        .withColumn('pattern_start',
-            F.when(
-                (F.col('value') == 'p') &
-                (F.lead('n_count', 1).over(window_prev) >= 8) &
-                (F.col('id') == F.col('p_group')),  # First p in sequence
+                (F.col(value_column) != F.lag(F.col(value_column), 1).over(window_spec)) |
+                F.lag(F.col(value_column), 1).over(window_spec).isNull(),
                 1
             ).otherwise(0))
-        # Keep only the first occurrence
+        # Mark the sequence start that corresponds to flag=1
         .withColumn('result',
             F.when(
-                F.sum('pattern_start').over(Window.orderBy('id')) <= 1,
-                F.col('pattern_start')
+                (F.col('seq_start') == 1) &
+                (F.col(value_column) == F.first(
+                    F.when(F.col(flag_column) == 1, F.col(value_column))
+                    .otherwise(None)
+                ).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing))),
+                1
+            ).otherwise(0))
+        # Keep only the occurrence that matches the flag position
+        .withColumn('result',
+            F.when(
+                F.sum(F.col('result')).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)) <= 
+                F.sum(F.col(flag_column)).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)),
+                F.col('result')
             ).otherwise(0))
         .select('result'))
 
-# Example usage:
-data = ['f','p','f','p','p','f','p','p','p','p','n','n','n','n','n']
-df = spark.createDataFrame([(x,) for x in data], ['value'])
-result_df = find_pattern(df)
+# Example usage
+data = [('c','0'), ('c','0'), ('a','0'), ('a','0'), ('b','0'), ('b','0'), 
+        ('c','0'), ('c','0'), ('a','0'), ('a','0'), ('a','0'), ('a','1'), 
+        ('b','0'), ('b','0')]
+df = spark.createDataFrame(data, ['letter', 'flag'])
+result_df = find_pattern_start(df, 'letter', 'flag')
