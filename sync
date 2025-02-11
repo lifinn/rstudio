@@ -1,22 +1,44 @@
-window_spec = Window.orderBy('id').rowsBetween(0, 8)
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
 def find_pattern(df):
+    # Add row number for ordering
+    df = df.withColumn('id', F.monotonically_increasing_id())
+    
+    # Create a window for checking consecutive values
+    window_prev = Window.orderBy('id')
+    
     return (df
-        # Add row number as id for ordering
-        .withColumn('id', F.monotonically_increasing_id())
-        # Create a column that checks if next 8 values are all 'n'
-        .withColumn('next_8_n', 
-            (F.sum(F.when(F.col('value') == 'n', 1).otherwise(0))
-            .over(window_spec) == 8))
-        # Check if current value is 'p'
-        .withColumn('is_p', F.col('value') == 'p')
-        # Combine conditions: current is 'p' AND next 8 are 'n'
-        .withColumn('pattern_start', 
-            F.when(F.col('is_p') & F.col('next_8_n'), 1).otherwise(0))
+        # Mark where consecutive 'n' sequence starts
+        .withColumn('n_start',
+            F.when(
+                (F.col('value') == 'n') & 
+                (F.lag('value', 1).over(window_prev) != 'n'),
+                F.col('id')
+            ).otherwise(None))
+        # Fill forward the start position for all 'n's in the sequence
+        .withColumn('n_group',
+            F.last('n_start', ignorenulls=True).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)))
+        # Count consecutive 'n's in each group
+        .withColumn('n_count',
+            F.sum(F.when(F.col('value') == 'n', 1).otherwise(0))
+            .over(Window.partitionBy('n_group').orderBy('id').rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+        # Find where 'p' is followed by 8 consecutive 'n's
+        .withColumn('pattern_start',
+            F.when(
+                (F.col('value') == 'p') &
+                (F.lead('n_count', 8).over(window_prev) == 8),
+                1
+            ).otherwise(0))
         # Keep only the first occurrence
-        .withColumn('result', 
-            F.when(F.sum('pattern_start').over(Window.orderBy('id')) <= 1, 
-                  F.col('pattern_start'))
-            .otherwise(0))
-        # Select only the result column
+        .withColumn('result',
+            F.when(
+                F.sum('pattern_start').over(Window.orderBy('id')) <= 1,
+                F.col('pattern_start')
+            ).otherwise(0))
         .select('result'))
+
+# Example usage:
+data = ['p','p','p','n','n','n','n','n','n','n','n','n','n','f','p','p','p','n','n']
+df = spark.createDataFrame([(x,) for x in data], ['value'])
+result_df = find_pattern(df)
