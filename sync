@@ -1,40 +1,52 @@
-from pyspark.sql import functions as F
-from pyspark.sql.window import Window
+#!/bin/bash
 
-def find_pattern_start(df, value_column, flag_column):
-    window_spec = Window.orderBy('id')
-    
-    return (df
-        .withColumn('id', F.monotonically_increasing_id())
-        # Find where new sequence starts
-        .withColumn('seq_start',
-            F.when(
-                (F.col(value_column) != F.lag(F.col(value_column), 1).over(window_spec)) |
-                F.lag(F.col(value_column), 1).over(window_spec).isNull(),
-                1
-            ).otherwise(0))
-        # Mark the sequence start that corresponds to flag=1
-        .withColumn('result',
-            F.when(
-                (F.col('seq_start') == 1) &
-                (F.col(value_column) == F.first(
-                    F.when(F.col(flag_column) == 1, F.col(value_column))
-                    .otherwise(None)
-                ).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing))),
-                1
-            ).otherwise(0))
-        # Keep only the occurrence that matches the flag position
-        .withColumn('result',
-            F.when(
-                F.sum(F.col('result')).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)) <= 
-                F.sum(F.col(flag_column)).over(Window.orderBy('id').rowsBetween(Window.unboundedPreceding, 0)),
-                F.col('result')
-            ).otherwise(0))
-        .select('result'))
+BASE_DIR="$HOME/buk_ukc_ifrs9_gen3_implementation"
+CONFIG_DIR="$BASE_DIR/configs/local_tcp_configs"
+TEST_DIR="$BASE_DIR/test/buk_ukc_ifrs9_gen3"
+INPUT_DIR="$TEST_DIR/data/input"
+OUTPUT_DIR="$TEST_DIR/data/output"
 
-# Example usage
-data = [('c','0'), ('c','0'), ('a','0'), ('a','0'), ('b','0'), ('b','0'), 
-        ('c','0'), ('c','0'), ('a','0'), ('a','0'), ('a','0'), ('a','1'), 
-        ('b','0'), ('b','0')]
-df = spark.createDataFrame(data, ['letter', 'flag'])
-result_df = find_pattern_start(df, 'letter', 'flag')
+executor() {
+    local t0=$(echo "$1" | sed 's/-.*//')
+    local t1=$(echo "$1" | sed 's/-.*//' | awk -F'-' '{ month=$2+1; if (month < 10) month="0"month; if (month > 12) { month="01"; $1+=1 } print $1"-"month }')
+
+    echo "Processing: t0='$t0', t1='$t1'"
+
+    # Backup config files
+    for file in mef_io_config_tcp.json task_graph_config_tcp.json; do
+        cp "$CONFIG_DIR/$file" "$CONFIG_DIR/${file}.bak"
+    done
+
+    # Create output directory
+    mkdir -p "$OUTPUT_DIR/${t0}_output"
+
+    # Modify JSON configurations
+    jq --indent 4 --arg T0 "$t0" --arg T1 "$t1" '
+        .["mef.parquet_json_reader"].parquet_params.input_dir = "data/input/" + $T0 |
+        .["mef.parquet_json_reader"].json_params.input_dir = "data/input/" + $T0 |
+        .["mef.parquet_writer"].output_dir = "data/output/" + $T0 + "_output" |
+        (.[] | select(.params.simulation_range.start) | .params.simulation_range.start) = $T1
+    ' "$CONFIG_DIR/mef_io_config_tcp.json" > "$CONFIG_DIR/tmp.json"
+
+    # Apply JSON updates
+    mv "$CONFIG_DIR/tmp.json" "$CONFIG_DIR/mef_io_config_tcp.json"
+    mv "$CONFIG_DIR/tmp.json" "$CONFIG_DIR/task_graph_config_tcp.json"
+
+    # Run processing scripts
+    ./tcp.sh SchemaGen
+    ./tcp.sh DataflowGen
+    ./tcp.sh --TestModel --os lin
+}
+
+# Define years
+dates=(201811 201911 202011)
+
+# Loop through years and process files
+for year in "${dates[@]}"; do
+    parquet_count=$(find "$INPUT_DIR/$year" -maxdepth 1 -type f -name "*.parquet" | wc -l)
+    folder_count=$(find "$INPUT_DIR/$year" -maxdepth 1 -type d | wc -l)
+
+    echo "There are $parquet_count parquet files and $folder_count folders for $year"
+
+    executor "$year"
+done
