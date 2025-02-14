@@ -1,19 +1,22 @@
-#!/bin/bash
+FOLDER_A := /path/to/folderA
+FOLDER_B := /path/to/folderB
+MISSING_FILES := missing_files.txt
 
-FOLDER_A="/path/to/folderA"
-FOLDER_B="/path/to/folderB"
+.PHONY: compare clean
 
-# List filenames (without paths) and sort them
-FILES_A=$(find "$FOLDER_A" -type f -printf "%f\n" | sort)
-FILES_B=$(find "$FOLDER_B" -type f -printf "%f\n" | sort)
+# Compare files in Folder A but not in Folder B
+compare:
+	@echo "Comparing files in $(FOLDER_A) and $(FOLDER_B)..."
+	@find $(FOLDER_A) -type f -printf "%f\n" | sort > folderA_files.txt
+	@find $(FOLDER_B) -type f -printf "%f\n" | sort > folderB_files.txt
+	@comm -23 folderA_files.txt folderB_files.txt > $(MISSING_FILES)
+	@if [ -s $(MISSING_FILES) ]; then \
+		echo "Files in $(FOLDER_A) but not in $(FOLDER_B):"; \
+		cat $(MISSING_FILES); \
+	else \
+		echo "All files in $(FOLDER_A) exist in $(FOLDER_B)."; \
+	fi
 
-# Compare and find files in A but not in B
-MISSING_FILES=$(comm -23 <(echo "$FILES_A") <(echo "$FILES_B"))
-
-# Output results
-if [[ -n "$MISSING_FILES" ]]; then
-    echo "Files in $FOLDER_A but not in $FOLDER_B:"
-    echo "$MISSING_FILES"
-else
-    echo "All files in $FOLDER_A exist in $FOLDER_B."
-fi
+# Clean up temporary files
+clean:
+	rm -f folderA_files.txt folderB_files.txt $(MISSING_FILES)
