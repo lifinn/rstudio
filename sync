@@ -1,4 +1,5 @@
-.PHONY: all clean
+# Makefile for pdead pipeline execution
+# Equivalent to pdead_combined.sh functionality
 
 # Configuration
 N := 2
@@ -6,29 +7,42 @@ PIPE := pdead_dynamic
 MONTHS := 20070731-20081231
 LOG_DIR := $(HOME)/buk_ukc_data_factory/logs/$(PIPE)
 
-# Get the list of dates
-ifeq ($(findstring -,$(MONTHS)),-)
-    START_DATE := $(shell echo $(MONTHS) | cut -d'-' -f1)
-    END_DATE := $(shell echo $(MONTHS) | cut -d'-' -f2)
-    BASES := $(shell while [ "$$current_date" -le "$(END_DATE)" ]; do \
-        echo "$$current_date"; \
-        current_date=$$(date -d "$$current_date +1 month" +%Y%m%d); \
-        done)
-else
-    BASES := $(shell echo $(MONTHS) | tr ',' ' ')
-endif
+# Default target
+.PHONY: all
+all: help
 
-# Generate pipeline targets
-TARGETS := $(foreach base,$(BASES),pipeline-$(base))
+# Help message
+.PHONY: help
+help:
+	@echo "Usage:"
+	@echo "  make krun    - Run the pdead pipeline for specified months"
+	@echo "  make help    - Show this help message"
 
-all: $(LOG_DIR) $(TARGETS)
-
+# Create log directory
 $(LOG_DIR):
-	mkdir -p $@
+	mkdir -p $(LOG_DIR)
 
-pipeline-%: | $(LOG_DIR)
-	@echo "$$(date +"%T") Starting: kedro run --pipeline=$(PIPE)_$* --async"
-	@kedro run --pipeline=$(PIPE)_$* --async > $(LOG_DIR)/$(PIPE)_$*.log 2>&1
-
-clean:
-	rm -rf $(LOG_DIR)
+# Main target to run the pipeline
+.PHONY: krun
+krun: $(LOG_DIR)
+	@bash -c 'source "$$HOME/.bashrc" && cd "$$HOME/buk_ukc_data_factory" && \
+	generate_dates() { \
+		local start_date=$$1 end_date=$$2; \
+		current_date=$$start_date; \
+		while [ "$$current_date" -le "$$end_date" ]; do \
+			echo "$$current_date"; \
+			current_date=$$(date --date="$${current_date} +1 month" +%Y%m%d); \
+		done; \
+	}; \
+	generate_commands() { \
+		if [[ "$(MONTHS)" == *-* ]]; then \
+			local start_date=$${$(MONTHS)%-*} end_date=$${$(MONTHS)#*-}; \
+			bases=($$(generate_dates "$$start_date" "$$end_date")); \
+		else \
+			IFS="," read -ra bases <<< "$(MONTHS)"; \
+		fi; \
+		for base in "$${bases[@]}"; do \
+			echo "kedro run --pipeline=$(PIPE)_$$base --async > $(LOG_DIR)/$(PIPE)_$$base.log 2>&1"; \
+		done; \
+	}; \
+	generate_commands | xargs -n 1 -P $(N) -I {} sh -c "echo \"$$(date +%T) Starting: {}\" && eval {}"'
