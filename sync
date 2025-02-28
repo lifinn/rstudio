@@ -1,38 +1,40 @@
-source "$HOME"/.bashrc
-cd "$HOME"/buk_ukc_data_factory || exit
+#!/bin/bash
+set -euo pipefail  # Add error handling and strict mode
 
+source "$HOME"/.bashrc
+cd "$HOME"/buk_ukc_data_factory || exit 1
+
+# Configuration
 N=2
 pipe=pdead_dynamic
-months="20070731-20081231"  # Example format: "20080831,20091030" or "20070731-20081231"
-mkdir -p logs/"${pipe}"
+months="20070731-20081231"
+log_dir="$HOME/buk_ukc_data_factory/logs/${pipe}"
+mkdir -p "$log_dir"
 
 # Function to generate dates between start and end dates
 generate_dates() {
-    local start_date=$1
-    local end_date=$2
-    while [ "$start_date" -le "$end_date" ]; do
-        echo "$start_date"
-        start_date=$(date -d "$start_date +1 month" +%Y%m%d)
+    local start_date=$1 end_date=$2
+    current_date=$start_date
+    while [ "$current_date" -le "$end_date" ]; do
+        echo "$current_date"
+        current_date=$(date --date="${current_date} +1 month" +%Y%m%d)
     done
 }
 
-# Process months input
-if [[ $months == *-* ]]; then
-    # Range format
-    start_date=${months%-*}
-    end_date=${months#*-}
-    mapfile -t bases < <(generate_dates "$start_date" "$end_date")
-else
-    # Comma-separated format
-    IFS=',' read -ra bases <<< "$months"
-fi
+# Process months input and generate commands
+generate_commands() {
+    local base
+    if [[ $months == *-* ]]; then
+        local start_date=${months%-*} end_date=${months#*-}
+        bases=($(generate_dates "$start_date" "$end_date"))
+    else
+        IFS=',' read -ra bases <<< "$months"
+    fi
 
-# Generate and execute commands for each base date
-cmds=()
-for base in "${bases[@]}"; do
-    cmd="kedro run --pipeline=${pipe}_${base} --async > $HOME/buk_ukc_data_factory/logs/${pipe}/${pipe}_${base}.log 2>&1"
-    cmds+=("$cmd")
-done
+    for base in "${bases[@]}"; do
+        echo "kedro run --pipeline=${pipe}_${base} --async > $log_dir/${pipe}_${base}.log 2>&1"
+    done
+}
 
-# Execute commands in parallel with specified number of threads
-printf "%s\n" "${cmds[@]}" | xargs -n 1 -P "${N}" -I {} sh -c 'printf "%s\n" "$(date +"%T") @ {}" && {}'
+# Main execution
+generate_commands | xargs -n 1 -P "$N" sh -c 'echo "$(date +"%T") Starting: $0" && eval "$0"' _
