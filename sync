@@ -1,22 +1,30 @@
-FOLDER_A := /path/to/folderA
-FOLDER_B := /path/to/folderB
-MISSING_FILES := missing_files.txt
+source "$HOME"/.bashrc
+cd "$HOME"/buk_ukc_data_factory || exit
 
-.PHONY: compare clean
+read -p "How many threads do you want (1-6): " N
+read -p "From which year do you want to start (07, 08): " start
+read -p "At which year do you want to end (14, 15): " end
+read -p "Which pipeline do you want to execute (pdead_indicator, pdead_dynamic): " pipe
 
-# Compare files in Folder A but not in Folder B
-compare:
-	@echo "Comparing files in $(FOLDER_A) and $(FOLDER_B)..."
-	@find $(FOLDER_A) -type f -printf "%f\n" | sort > folderA_files.txt
-	@find $(FOLDER_B) -type f -printf "%f\n" | sort > folderB_files.txt
-	@comm -23 folderA_files.txt folderB_files.txt > $(MISSING_FILES)
-	@if [ -s $(MISSING_FILES) ]; then \
-		echo "Files in $(FOLDER_A) but not in $(FOLDER_B):"; \
-		cat $(MISSING_FILES); \
-	else \
-		echo "All files in $(FOLDER_A) exist in $(FOLDER_B)."; \
-	fi
+years=(07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23)
+mkdir -p logs/"${pipe}"
 
-# Clean up temporary files
-clean:
-	rm -f folderA_files.txt folderB_files.txt $(MISSING_FILES)
+for year in "${years[@]}"; do
+    if [ "$year" -ge "$start" ] && [ "$year" -le "$end" ]; then
+        # Generate base dates for each month in the year
+        bases=()
+        for i in $(seq 0 11); do
+            bases+=($(date -d "$(date -d "20${year}0228 +$i month" +%Y-%m-01) -1 day" +%Y%m%d))
+        done
+
+        # Generate and execute commands for each base date
+        cmds=()
+        for base in "${bases[@]}"; do
+            cmd="kedro run --pipeline=${pipe}_${base} --async > $HOME/buk_ukc_data_factory/logs/${pipe}/${pipe}_${base}.log 2>&1"
+            cmds+=("$cmd")
+        done
+
+        # Execute commands in parallel with specified number of threads
+        printf "%s\n" "${cmds[@]}" | xargs -n 1 -P "${N}" -I {} sh -c 'printf "%s\n" "$(date +"%T") @ {}" && {}'
+    fi
+done
