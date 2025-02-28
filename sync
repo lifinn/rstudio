@@ -1,40 +1,34 @@
-#!/bin/bash
-set -euo pipefail  # Add error handling and strict mode
-
-source "$HOME"/.bashrc
-cd "$HOME"/buk_ukc_data_factory || exit 1
+.PHONY: all clean
 
 # Configuration
-N=2
-pipe=pdead_dynamic
-months="20070731-20081231"
-log_dir="$HOME/buk_ukc_data_factory/logs/${pipe}"
-mkdir -p "$log_dir"
+N := 2
+PIPE := pdead_dynamic
+MONTHS := 20070731-20081231
+LOG_DIR := $(HOME)/buk_ukc_data_factory/logs/$(PIPE)
 
-# Function to generate dates between start and end dates
-generate_dates() {
-    local start_date=$1 end_date=$2
-    current_date=$start_date
-    while [ "$current_date" -le "$end_date" ]; do
-        echo "$current_date"
-        current_date=$(date --date="${current_date} +1 month" +%Y%m%d)
-    done
-}
+# Get the list of dates
+ifeq ($(findstring -,$(MONTHS)),-)
+    START_DATE := $(shell echo $(MONTHS) | cut -d'-' -f1)
+    END_DATE := $(shell echo $(MONTHS) | cut -d'-' -f2)
+    BASES := $(shell while [ "$$current_date" -le "$(END_DATE)" ]; do \
+        echo "$$current_date"; \
+        current_date=$$(date -d "$$current_date +1 month" +%Y%m%d); \
+        done)
+else
+    BASES := $(shell echo $(MONTHS) | tr ',' ' ')
+endif
 
-# Process months input and generate commands
-generate_commands() {
-    local base
-    if [[ $months == *-* ]]; then
-        local start_date=${months%-*} end_date=${months#*-}
-        bases=($(generate_dates "$start_date" "$end_date"))
-    else
-        IFS=',' read -ra bases <<< "$months"
-    fi
+# Generate pipeline targets
+TARGETS := $(foreach base,$(BASES),pipeline-$(base))
 
-    for base in "${bases[@]}"; do
-        echo "kedro run --pipeline=${pipe}_${base} --async > $log_dir/${pipe}_${base}.log 2>&1"
-    done
-}
+all: $(LOG_DIR) $(TARGETS)
 
-# Main execution
-generate_commands | xargs -n 1 -P "$N" sh -c 'echo "$(date +"%T") Starting: $0" && eval "$0"' _
+$(LOG_DIR):
+	mkdir -p $@
+
+pipeline-%: | $(LOG_DIR)
+	@echo "$$(date +"%T") Starting: kedro run --pipeline=$(PIPE)_$* --async"
+	@kedro run --pipeline=$(PIPE)_$* --async > $(LOG_DIR)/$(PIPE)_$*.log 2>&1
+
+clean:
+	rm -rf $(LOG_DIR)
