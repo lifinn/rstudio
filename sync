@@ -1,47 +1,84 @@
-.PHONY: all clean print-dates
+.PHONY: help
+help: ## Display this help screen
+	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk ' \
+		BEGIN {FS = ":.*?## "} \
+		/^[a-zA-Z_-]+:.*?## / { \
+			rule = $$1; \
+			help  = $$2; \
+			if ( help == "" ) { \
+				help = "No help text available."; \
+			} \
+			printf "%-30s %s\n", rule, help; \
+		} \
+	'
 
-# Configuration
-SHELL := /bin/bash
-N := 2
-PIPE := pdead_dynamic
-MONTHS := 20080131-20081231
-LOG_DIR := $(HOME)/buk_ukc_data_factory/logs/$(PIPE)
-DATA_FACTORY_DIR := $(HOME)/buk_ukc_data_factory
+# Example rules with help strings:
+rule1: ## This is the help text for rule1. It does something important.
+	@echo "Executing rule1"
 
-# Generate list of dates - fixed shell function call
-define generate_dates
-	start_date=$$(echo $(MONTHS) | cut -d- -f1); \
-	end_date=$$(echo $(MONTHS) | cut -d- -f2); \
-	current_date=$$start_date; \
-	while [ "$$current_date" -le "$$end_date" ]; do \
-		echo "$$current_date"; \
-		current_date=$$(date -d "$${current_date:0:6}01 +1 month -1 day" +%Y%m%d); \
-		current_date=$$(date -d "$${current_date:0:6}01 +1 month" +%Y%m%d); \
-	done
-endef
+rule2: ## Another rule with a slightly longer help description, to show how formatting works.
+	@echo "Executing rule2"
 
-DATES := $(shell bash -c '$(generate_dates)')
+rule_without_help:
+	@echo "Executing rule_without_help"
 
-# Default target
-all: setup $(DATES)
+setup_kubeconfig_%: setup_kubectl_hpecp install_kubectl_hpecp refresh_kubeconfig set_env_vars ## Setup kubeconfig for context $* (e.g., make setup_kubeconfig_tc14_dna_dev)
+	@echo ">>> Successfully set up kubeconfig and associated environment variables for context $*"
 
-# Create log directory
-setup:
-	@mkdir -p $(LOG_DIR)
-	@cd $(DATA_FACTORY_DIR)
+.PHONY: setup_kubeconfig_% setup_kubectl_hpecp install_kubectl_hpecp refresh_kubeconfig set_env_vars cleanup_kubectl_temp_files
 
-# Pattern rule for running kedro pipeline
-%: setup
-	@echo "$$(date +"%T") Starting: kedro run --pipeline=$(PIPE)_$@ --async"
-	@kedro run --pipeline=$(PIPE)_$@ --async > $(LOG_DIR)/$(PIPE)_$@.log 2>&1
+VAR = $* # Context name, set dynamically by pattern rule
+KUBECTL_HPECP_VERSION = linux.star
+KUBECTL_HPECP_FILENAME = kubectl-hpecp-$(KUBECTL_HPECP_VERSION)
+KUBECTL_DOWNLOAD_URL = https://nexus.barcapint.com/nexus/content/repositories/buk-releases/com/barclays/bukiit/bdd/ElasticDataPlatform/kube/kubectl-hpecp-$(KUBECTL_HPECP_VERSION)
+INSTALL_DIR = $(HOME)/.local/bin
+KUBECTL_INSTALL_PATH = $(INSTALL_DIR)/kubectl-hpecp
+KUBECONFIG_PATH = $(HOME)/.kube/config
+KUBECONFIG_BACKUP_PATH = $(HOME)/.kube/config-backup
+HPECP_CONFIG_PATH = $(HOME)/.kube/.hpecp/$(VAR)/config
+FAKE_KUBECONFIG_PATH = /path/that/does/not/exist
+TEMP_DOWNLOAD_FILE = kubectl-hpecp-$(KUBECTL_HPECP_VERSION)
+TEMP_TAR_FILE = kubectl-hpecp-$(KUBECTL_HPECP_VERSION).tar
 
-# Print dates for debugging
-print-dates:
-	@echo "Dates to be processed:"
-	@for date in $(DATES); do \
-		echo "  - $$date"; \
-	done
+setup_kubectl_hpecp: ## Stage 1: Download kubectl-hpecp
+	@echo "======== Stage 1: Downloading kubectl-hpecp ========"
+	@echo "Context: $(VAR)"
+	@echo "Downloading from: $(KUBECTL_DOWNLOAD_URL)"
+	@wget "$(KUBECTL_DOWNLOAD_URL)" -O "$(TEMP_TAR_FILE)"
 
-# Clean logs
-clean:
-	@rm -rf $(LOG_DIR)
+install_kubectl_hpecp: setup_kubectl_hpecp ## Stage 2: Install kubectl-hpecp
+	@echo "======== Stage 2: Installing kubectl-hpecp ========"
+	@echo "Extracting $(TEMP_TAR_FILE)..."
+	@tar -xf "$(TEMP_TAR_FILE)"
+	@echo "Installing kubectl-hpecp to $(INSTALL_DIR)..."
+	@mkdir -p "$(INSTALL_DIR)"
+	@cp kubectl-hpecp "$(KUBECTL_INSTALL_PATH)"
+
+refresh_kubeconfig: install_kubectl_hpecp ## Stage 3: Refresh kubeconfig for context $(VAR)
+	@echo "======== Stage 3: Refreshing kubeconfig ========"
+	@echo "Context: $(VAR)"
+	@echo "Using your intranet account username when prompted!"
+	@echo "Select context number for $(VAR) when asked!"
+	kubectl hpecp refresh $(VAR)
+
+set_env_vars: refresh_kubeconfig cleanup_kubectl_temp_files ## Stage 4: Set environment variables
+	@echo "======== Stage 4: Setting Environment Variables ========"
+	@echo "Setting KUBECONFIG environment variables..."
+	@mkdir -p "$(HOME)/.kube" # Ensure .kube directory exists
+	@touch "$(KUBECONFIG_PATH)"
+	@cp -f "$(KUBECONFIG_PATH)" "$(KUBECONFIG_BACKUP_PATH)" # Use cp -f to force overwrite if backup exists
+	@KUBECONFIG="$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_BACKUP_PATH)" kubectl config view -raw > "$(KUBECONFIG_PATH)"
+	@echo "Updating ~/.bashrc..."
+	@grep -qxF "export KUBECONFIG=$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)" ~/.bashrc || \
+		echo "export KUBECONFIG=$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)" >> ~/.bashrc
+	@echo "Updating ~/.jupyter/jupyter_notebook_config.py..."
+	@mkdir -p "$(HOME)/.jupyter" # Ensure .jupyter directory exists
+	@grep -qxF "os.environ['KUBECONFIG'] = '$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)'" ~/.jupyter/jupyter_notebook_config.py || \
+		echo "os.environ['KUBECONFIG'] = '$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)'" >> ~/.jupyter/jupyter_notebook_config.py
+
+cleanup_kubectl_temp_files: install_kubectl_hpecp ## Stage 5: Cleanup temp files
+	@echo "======== Stage 5: Cleaning Up Temporary Files ========"
+	@echo "Cleaning up temporary kubectl files..."
+	@rm -f kubectl-hpecp "$(TEMP_TAR_FILE)" kubectl-hpecp.sig
+
+# Example usage: make setup_kubeconfig_tc14_dna_dev
