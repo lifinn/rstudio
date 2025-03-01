@@ -1,84 +1,21 @@
-.PHONY: help
-help: ## Display this help screen
-	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk ' \
-		BEGIN {FS = ":.*?## "} \
-		/^[a-zA-Z_-]+:.*?## / { \
-			rule = $$1; \
-			help  = $$2; \
-			if ( help == "" ) { \
-				help = "No help text available."; \
-			} \
-			printf "%-30s %s\n", rule, help; \
-		} \
-	'
-
-# Example rules with help strings:
-rule1: ## This is the help text for rule1. It does something important.
-	@echo "Executing rule1"
-
-rule2: ## Another rule with a slightly longer help description, to show how formatting works.
-	@echo "Executing rule2"
-
-rule_without_help:
-	@echo "Executing rule_without_help"
-
-setup_kubeconfig_%: setup_kubectl_hpecp install_kubectl_hpecp refresh_kubeconfig set_env_vars ## Setup kubeconfig for context $* (e.g., make setup_kubeconfig_tc14_dna_dev)
-	@echo ">>> Successfully set up kubeconfig and associated environment variables for context $*"
-
-.PHONY: setup_kubeconfig_% setup_kubectl_hpecp install_kubectl_hpecp refresh_kubeconfig set_env_vars cleanup_kubectl_temp_files
-
-VAR = $* # Context name, set dynamically by pattern rule
-KUBECTL_HPECP_VERSION = linux.star
-KUBECTL_HPECP_FILENAME = kubectl-hpecp-$(KUBECTL_HPECP_VERSION)
-KUBECTL_DOWNLOAD_URL = https://nexus.barcapint.com/nexus/content/repositories/buk-releases/com/barclays/bukiit/bdd/ElasticDataPlatform/kube/kubectl-hpecp-$(KUBECTL_HPECP_VERSION)
-INSTALL_DIR = $(HOME)/.local/bin
-KUBECTL_INSTALL_PATH = $(INSTALL_DIR)/kubectl-hpecp
-KUBECONFIG_PATH = $(HOME)/.kube/config
-KUBECONFIG_BACKUP_PATH = $(HOME)/.kube/config-backup
-HPECP_CONFIG_PATH = $(HOME)/.kube/.hpecp/$(VAR)/config
-FAKE_KUBECONFIG_PATH = /path/that/does/not/exist
-TEMP_DOWNLOAD_FILE = kubectl-hpecp-$(KUBECTL_HPECP_VERSION)
-TEMP_TAR_FILE = kubectl-hpecp-$(KUBECTL_HPECP_VERSION).tar
-
-setup_kubectl_hpecp: ## Stage 1: Download kubectl-hpecp
-	@echo "======== Stage 1: Downloading kubectl-hpecp ========"
-	@echo "Context: $(VAR)"
-	@echo "Downloading from: $(KUBECTL_DOWNLOAD_URL)"
-	@wget "$(KUBECTL_DOWNLOAD_URL)" -O "$(TEMP_TAR_FILE)"
-
-install_kubectl_hpecp: setup_kubectl_hpecp ## Stage 2: Install kubectl-hpecp
-	@echo "======== Stage 2: Installing kubectl-hpecp ========"
-	@echo "Extracting $(TEMP_TAR_FILE)..."
-	@tar -xf "$(TEMP_TAR_FILE)"
-	@echo "Installing kubectl-hpecp to $(INSTALL_DIR)..."
-	@mkdir -p "$(INSTALL_DIR)"
-	@cp kubectl-hpecp "$(KUBECTL_INSTALL_PATH)"
-
-refresh_kubeconfig: install_kubectl_hpecp ## Stage 3: Refresh kubeconfig for context $(VAR)
-	@echo "======== Stage 3: Refreshing kubeconfig ========"
-	@echo "Context: $(VAR)"
-	@echo "Using your intranet account username when prompted!"
-	@echo "Select context number for $(VAR) when asked!"
-	kubectl hpecp refresh $(VAR)
-
-set_env_vars: refresh_kubeconfig cleanup_kubectl_temp_files ## Stage 4: Set environment variables
-	@echo "======== Stage 4: Setting Environment Variables ========"
-	@echo "Setting KUBECONFIG environment variables..."
-	@mkdir -p "$(HOME)/.kube" # Ensure .kube directory exists
-	@touch "$(KUBECONFIG_PATH)"
-	@cp -f "$(KUBECONFIG_PATH)" "$(KUBECONFIG_BACKUP_PATH)" # Use cp -f to force overwrite if backup exists
-	@KUBECONFIG="$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_BACKUP_PATH)" kubectl config view -raw > "$(KUBECONFIG_PATH)"
-	@echo "Updating ~/.bashrc..."
-	@grep -qxF "export KUBECONFIG=$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)" ~/.bashrc || \
-		echo "export KUBECONFIG=$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)" >> ~/.bashrc
-	@echo "Updating ~/.jupyter/jupyter_notebook_config.py..."
-	@mkdir -p "$(HOME)/.jupyter" # Ensure .jupyter directory exists
-	@grep -qxF "os.environ['KUBECONFIG'] = '$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)'" ~/.jupyter/jupyter_notebook_config.py || \
-		echo "os.environ['KUBECONFIG'] = '$(FAKE_KUBECONFIG_PATH):$(KUBECONFIG_PATH)'" >> ~/.jupyter/jupyter_notebook_config.py
-
-cleanup_kubectl_temp_files: install_kubectl_hpecp ## Stage 5: Cleanup temp files
-	@echo "======== Stage 5: Cleaning Up Temporary Files ========"
-	@echo "Cleaning up temporary kubectl files..."
-	@rm -f kubectl-hpecp "$(TEMP_TAR_FILE)" kubectl-hpecp.sig
-
-# Example usage: make setup_kubeconfig_tc14_dna_dev
+badlog	Finds and reports incomplete tasks in the 'buk_ukc_data_factory' system. Can be forced to re-check.
+cleanup_kubectl_temp_files	Removes temporary files after using Kubernetes tools. Can be forced to remove all.
+compare-clean	Deletes temporary files created during file comparison.
+compare	Shows files that exist in one folder but not another. Optionally shows differences within files.
+count	Tells you how many files are in a folder.
+disk	Shows how much disk space is used on your computer and in the current folder.
+git-search	Searches for a specific word or phrase in all the history of your Git project.
+git	Sets up Git for you to start using version control.
+hd_mev	Converts data from a special format into a format that's easier to analyze.
+install_kubectl_hpecp	Installs the necessary tools to work with Kubernetes.
+ipynb_checkpoints	Deletes backup files created by Jupyter Notebooks. Can be forced to delete all.
+mem	Shows how much memory your computer is using.
+pods	Lists the running applications in your Kubernetes environment.
+pwd	Checks the password for your VSCode online account.
+refresh_kubeconfig	Updates the settings for accessing your Kubernetes cluster.
+set_env_vars	Sets up important settings for your work.
+setup_kubectl_hpecp	Downloads the tools needed to work with Kubernetes.
+tar	Compresses a folder into a single, smaller file. Optionally excludes specific files.
+topme	Shows you what your computer is doing in real-time.
+untar	Extracts files from a compressed file.
+uptime	Shows how long your computer has been running.
